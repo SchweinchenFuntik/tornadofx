@@ -30,9 +30,11 @@ import java.util.*
 import java.util.concurrent.CountDownLatch
 import java.util.logging.Level
 import java.util.logging.Logger
+import kotlin.NoSuchElementException
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty
+import kotlin.reflect.full.primaryConstructor
 
 open class Scope() {
     internal var workspaceInstance: Workspace? = null
@@ -419,6 +421,7 @@ inline fun <reified T : Component> find(scope: Scope = FX.defaultScope, params: 
 inline fun <reified T : Component> find(scope: Scope = FX.defaultScope, vararg params: Pair<*, Any?>): T = find(scope, params.toMap())
 
 fun <T : Component> find(type: KClass<T>, scope: Scope = FX.defaultScope, vararg params: Pair<*, Any?>): T = find(type, scope, params.toMap())
+
 @Suppress("UNCHECKED_CAST")
 fun <T : Component> find(type: KClass<T>, scope: Scope = FX.defaultScope, params: Map<*, Any?>? = null): T {
     val useScope = FX.fixedScopes[type] ?: scope
@@ -431,7 +434,7 @@ fun <T : Component> find(type: KClass<T>, scope: Scope = FX.defaultScope, params
         if (!components.containsKey(type as KClass<out ScopedInstance>)) {
             synchronized(FX.lock) {
                 if (!components.containsKey(type)) {
-                    val cmp = type.java.newInstance()
+                    val cmp = createInstance(type, scope) //type.java.newInstance()
                     (cmp as? UIComponent)?.init()
                     // if cmp.scope overrode the scope, inject into that instead
                     if (cmp is Component && cmp.scope != useScope) {
@@ -446,7 +449,7 @@ fun <T : Component> find(type: KClass<T>, scope: Scope = FX.defaultScope, params
         return cmp
     }
 
-    val cmp = type.java.newInstance()
+    val cmp = createInstance(type, scope)  //type.java.newInstance()
     cmp.paramsProperty.value = stringKeyedMap
     (cmp as? Fragment)?.init()
 
@@ -455,6 +458,15 @@ fun <T : Component> find(type: KClass<T>, scope: Scope = FX.defaultScope, params
         cmp.scope.workspaceInstance = cmp
 
     return cmp
+}
+
+@Suppress("UNCHECKED_CAST")
+private fun <T : Any> createInstance(kClass: KClass<T>, scope: Scope): T { // (
+    val constructor = kClass.primaryConstructor ?: throw NoSuchElementException("Not found primary constructor")
+    val args = constructor.parameters.asSequence()
+            .map { it to find(it.type.classifier as KClass<Component>, scope = scope) }
+            .toMap()
+    return constructor.callBy(args)
 }
 
 interface DIContainer {
